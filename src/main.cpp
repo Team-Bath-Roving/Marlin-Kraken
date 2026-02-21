@@ -199,13 +199,44 @@ void setup() {
   SerialUSB.begin(115200);
   set_microros_serial_transports(SerialUSB);
 
+  // Wait for serial connection and agent with timeout
+  digitalWrite(LED_PIN, HIGH); // LED on while waiting for agent
+  
+  // Give some time for USB to stabilize
+  delay(2000);
+  
   // Start motors
   for (Motor& joint : joints) joint.begin();
   // d1 is not used
 
   // Create the node
   allocator = rcl_get_default_allocator();
-  rclc_support_init(&support, 0, NULL, &allocator);
+  
+  // Try to initialize support with retries
+  rcl_ret_t ret;
+  int retry_count = 0;
+  const int max_retries = 10;
+  
+  do {
+    ret = rclc_support_init(&support, 0, NULL, &allocator);
+    if (ret != RCL_RET_OK) {
+      digitalWrite(LED_PIN, !digitalRead(LED_PIN)); // Blink while retrying
+      delay(500);
+      retry_count++;
+    }
+  } while (ret != RCL_RET_OK && retry_count < max_retries);
+  
+  if (ret != RCL_RET_OK) {
+    // Failed to connect - blink rapidly
+    while (1) {
+      digitalWrite(LED_PIN, HIGH);
+      delay(100);
+      digitalWrite(LED_PIN, LOW);
+      delay(100);
+    }
+  }
+  
+  digitalWrite(LED_PIN, LOW); // LED off when connected
   rclc_node_init_default(&node, "motor_node", "", &support);
 
   /* ----------------------------- Register Topics ---------------------------- */
