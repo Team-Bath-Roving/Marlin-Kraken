@@ -196,47 +196,42 @@ void setup() {
   digitalWrite(LED_PIN, LOW);
   delay(2000);
 
+  // Use SerialUSB for micro-ROS connection
   SerialUSB.begin(115200);
   set_microros_serial_transports(SerialUSB);
-
-  // Wait for serial connection and agent with timeout
-  digitalWrite(LED_PIN, HIGH); // LED on while waiting for agent
   
-  // Give some time for USB to stabilize
+  // Give USB time to stabilize
   delay(2000);
   
   // Start motors
   for (Motor& joint : joints) joint.begin();
   // d1 is not used
 
-  // Create the node
+  // Create the node - wait for agent with timeout
   allocator = rcl_get_default_allocator();
   
-  // Try to initialize support with retries
-  rcl_ret_t ret;
-  int retry_count = 0;
-  const int max_retries = 10;
+  // Ping agent first to establish connection
+  digitalWrite(LED_PIN, HIGH);
+  const int ping_timeout = 60000; // 60 seconds
+  unsigned long ping_start = millis();
   
-  do {
-    ret = rclc_support_init(&support, 0, NULL, &allocator);
-    if (ret != RCL_RET_OK) {
-      digitalWrite(LED_PIN, !digitalRead(LED_PIN)); // Blink while retrying
-      delay(500);
-      retry_count++;
-    }
-  } while (ret != RCL_RET_OK && retry_count < max_retries);
-  
-  if (ret != RCL_RET_OK) {
-    // Failed to connect - blink rapidly
-    while (1) {
-      digitalWrite(LED_PIN, HIGH);
-      delay(100);
-      digitalWrite(LED_PIN, LOW);
-      delay(100);
+  while (rmw_uros_ping_agent(1000, 1) != RMW_RET_OK) {
+    digitalWrite(LED_PIN, (millis() / 250) % 2); // Fast blink
+    if (millis() - ping_start > ping_timeout) {
+      // Timeout - fast blink forever
+      while (1) {
+        digitalWrite(LED_PIN, HIGH);
+        delay(100);
+        digitalWrite(LED_PIN, LOW);
+        delay(100);
+      }
     }
   }
   
-  digitalWrite(LED_PIN, LOW); // LED off when connected
+  digitalWrite(LED_PIN, LOW); // LED off when agent responds
+  
+  // Now initialize support
+  rclc_support_init(&support, 0, NULL, &allocator);
   rclc_node_init_default(&node, "motor_node", "", &support);
 
   /* ----------------------------- Register Topics ---------------------------- */
@@ -339,10 +334,4 @@ void loop() {
     joint_positions[i] = radians(joints[i].currentPosition()); // Must be in radians
   }
   rcl_publish(&joint_state_pub, &joint_state_msg, NULL);
-
-  // Serial echo using SerialUSB
-  if (SerialUSB.available()) {
-    char c = SerialUSB.read();
-    SerialUSB.write(c);
-  }
 }
